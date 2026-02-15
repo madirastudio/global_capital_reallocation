@@ -1,25 +1,33 @@
-India Private Banks Under Macro Stress
+# Global Capital Reallocation Under Structural Shocks
 
-Banks:
-- HDFC Bank
-- ICICI Bank
-- Axis Bank
-- Kotak Mahindra Bank
+## Objective
 
-Frequency: Quarterly
-Period: FY10–FY25
+Build an empirical cross-region framework to analyze:
 
-Core Questions:
-1. Are NIMs peaking as rates & liquidity tighten?
-2. Are credit costs below through-cycle means?
-3. How sensitive are valuations to ROA downgrades?
+• Valuation dispersion across regions & sectors  
+• Earnings sensitivity to macro shocks  
+• Rolling macro betas & regime segmentation  
+• Post-shock capital reallocation dynamics  
+• Forward-looking allocation implications  
 
-Models:
-- Pooled & bank-wise NIM regressions
-- Credit cost mean reversion (Z-scores)
-- ROA → P/B valuation mapping
-- Earnings stress scenarios
+Regions: US, Europe, Japan, EM  
+Frequency: Monthly  
 
-Run:
+---
+
+## Core Methodology
+
+1. Compute cross-sectional valuation dispersion  
+2. Estimate earnings sensitivity to macro shocks  
+3. Estimate rolling macro betas (36m window)  
+4. Segment regimes (tightening / easing / crisis)  
+5. Analyze capital reallocation post-shock  
+6. Simulate forward scenarios  
+
+---
+
+## Run
+
+```bash
 pip install -r requirements.txt
 python run.py
