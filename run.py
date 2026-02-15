@@ -1,22 +1,28 @@
 from analysis import *
 
-df = load_data()
-df = engineer_features(df)
+def main():
 
-# Models
-nim_pooled = pooled_nim_model(df)
-nim_bankwise = bankwise_nim_models(df)
-cc_stats = credit_cost_reversion(df)
-val_model = valuation_model(df)
+    df = load_data()
 
-# Scenario
-latest = df.sort_values("quarter").groupby("bank").tail(1)
-stress = earnings_stress(latest, nim_shock=-0.4, cc_shock=0.5)
+    df = classify_regime(df)
 
-# Outputs
-print(nim_pooled.summary())
-print(cc_stats)
-print(val_model.summary())
+    disp = compute_dispersion(df)
+    plot_dispersion(disp)
 
-plot_nim(df)
-stress.to_excel("report/scenario_output.xlsx", index=False)
+    sens = earnings_sensitivity(df)
+    betas = rolling_beta(df)
+    realloc = capital_reallocation(df)
+
+    scenario = scenario_analysis(df, rate_shock=1.0)
+
+    print("\nEarnings Sensitivities\n")
+    for region, model in sens.items():
+        print(f"\n--- {region} ---")
+        print(model.summary())
+
+    print("\nScenario Output\n")
+    print(scenario.head())
+
+
+if __name__ == "__main__":
+    main()
