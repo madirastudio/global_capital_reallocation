@@ -2,4 +2,4 @@ pandas
 numpy
 statsmodels
 matplotlib
-openpyxl
+scikit-learn
