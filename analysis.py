@@ -1,89 +1,159 @@
+
+---
+
+# analysis.py
+
+```python
 import pandas as pd
 import numpy as np
-import statsmodels.formula.api as smf
+import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
-# ---------------- DATA LOAD ---------------- #
+
+# -------------------------------
+# 1. LOAD + MERGE
+# -------------------------------
 
 def load_data():
-    bank = pd.read_csv("data/fundamentals.csv", parse_dates=["quarter"])
-    macro = pd.read_csv("data/macro.csv", parse_dates=["quarter"])
-    prices = pd.read_csv("data/prices.csv", parse_dates=["quarter"])
+    equity = pd.read_csv("data/global_equity.csv", parse_dates=["date"])
+    macro = pd.read_csv("data/macro.csv", parse_dates=["date"])
+    flows = pd.read_csv("data/flows.csv", parse_dates=["date"])
 
-    df = (
-        bank.merge(macro, on="quarter", how="left")
-            .merge(prices, on=["bank", "quarter"], how="left")
-            .sort_values(["bank", "quarter"])
-    )
-    return df
-
-# ---------------- FEATURES ---------------- #
-
-def engineer_features(df):
-    df["loan_growth_yoy"] = df.groupby("bank")["loans"].pct_change(4) * 100
-    df["deposit_growth_yoy"] = df.groupby("bank")["deposits"].pct_change(4) * 100
-
-    df["credit_cost"] = df["provisions"] / df["avg_loans"] * 100
-    df["pb"] = df["price"] / df["bvps"]
-    df["term_spread"] = df["gsec_10y"] - df["repo"]
+    df = equity.merge(macro, on="date", how="left")
+    df = df.merge(flows, on=["date", "region"], how="left")
 
     return df
 
-# ---------------- MODEL 1: NIM ---------------- #
 
-def pooled_nim_model(df):
-    model = smf.ols(
-        "nim ~ repo + term_spread + deposit_growth_yoy + C(bank)",
-        data=df
-    ).fit(cov_type="HC3")
-    return model
+# -------------------------------
+# 2. VALUATION DISPERSION
+# -------------------------------
 
-def bankwise_nim_models(df):
-    out = {}
-    for b in df.bank.unique():
-        m = smf.ols(
-            "nim ~ repo + term_spread + deposit_growth_yoy",
-            data=df[df.bank == b]
-        ).fit(cov_type="HC3")
-        out[b] = m
-    return out
-
-# ---------------- MODEL 2: CREDIT COST ---------------- #
-
-def credit_cost_reversion(df):
-    stats = (
-        df.groupby("bank")["credit_cost"]
-          .agg(["mean", "std", "last"])
-          .reset_index()
+def compute_dispersion(df):
+    disp = (
+        df.groupby(["date", "region"])["pe_ratio"]
+        .std()
+        .reset_index()
+        .rename(columns={"pe_ratio": "valuation_dispersion"})
     )
-    stats["z_score"] = (stats["last"] - stats["mean"]) / stats["std"]
-    return stats
+    return disp
 
-# ---------------- MODEL 3: ROA → VALUATION ---------------- #
 
-def valuation_model(df):
-    model = smf.ols(
-        "pb ~ roa + loan_growth_yoy + repo",
-        data=df
-    ).fit(cov_type="HC3")
-    return model
+# -------------------------------
+# 3. EARNINGS SENSITIVITY
+# -------------------------------
 
-# ---------------- SCENARIOS ---------------- #
+def earnings_sensitivity(df):
+    results = {}
 
-def earnings_stress(df, nim_shock, cc_shock):
+    for region in df["region"].unique():
+        sub = df[df["region"] == region].dropna()
+
+        X = sub[["rate_change", "inflation", "gdp_surprise"]]
+        X = sm.add_constant(X)
+        y = sub["earnings_growth"]
+
+        model = sm.OLS(y, X).fit()
+        results[region] = model
+
+    return results
+
+
+# -------------------------------
+# 4. ROLLING BETAS
+# -------------------------------
+
+def rolling_beta(df, window=36):
+    df = df.sort_values("date")
+
+    betas = []
+
+    for region in df["region"].unique():
+        sub = df[df["region"] == region].copy()
+
+        for i in range(window, len(sub)):
+            window_df = sub.iloc[i-window:i]
+
+            X = sm.add_constant(window_df["rate_change"])
+            y = window_df["returns"]
+
+            model = sm.OLS(y, X).fit()
+
+            betas.append({
+                "date": sub.iloc[i]["date"],
+                "region": region,
+                "beta_rate": model.params["rate_change"]
+            })
+
+    return pd.DataFrame(betas)
+
+
+# -------------------------------
+# 5. REGIME CLASSIFICATION
+# -------------------------------
+
+def classify_regime(df):
+
+    conditions = [
+        df["rate_change"] > 0.5,
+        df["rate_change"] < -0.5
+    ]
+
+    choices = ["tightening", "easing"]
+
+    df["regime"] = np.select(conditions, choices, default="neutral")
+
+    return df
+
+
+# -------------------------------
+# 6. CAPITAL REALLOCATION
+# -------------------------------
+
+def capital_reallocation(df):
+
+    realloc = (
+        df.groupby(["date", "region"])["flow"]
+        .sum()
+        .groupby(level=1)
+        .diff()
+        .reset_index()
+        .rename(columns={"flow": "flow_change"})
+    )
+
+    return realloc
+
+
+# -------------------------------
+# 7. SCENARIO SIMULATION
+# -------------------------------
+
+def scenario_analysis(df, rate_shock=1.0):
+
     df = df.copy()
-    df["roa_stressed"] = df["roa"] + 0.4 * nim_shock - 0.6 * cc_shock
-    return df
+    df["shock_rate"] = df["rate_change"] + rate_shock
 
-# ---------------- CHARTS ---------------- #
+    scenario = (
+        df.groupby("region")["shock_rate"]
+        .mean()
+        .reset_index()
+    )
 
-def plot_nim(df):
-    plt.figure(figsize=(8,4))
-    for b in df.bank.unique():
-        sub = df[df.bank == b]
-        plt.plot(sub.quarter, sub.nim, label=b)
+    return scenario
+
+
+# -------------------------------
+# 8. PLOT
+# -------------------------------
+
+def plot_dispersion(disp):
+
+    plt.figure()
+    for region in disp["region"].unique():
+        sub = disp[disp["region"] == region]
+        plt.plot(sub["date"], sub["valuation_dispersion"], label=region)
+
     plt.legend()
-    plt.title("NIM Trend")
-    plt.tight_layout()
-    plt.savefig("report/charts/nim_trend.png")
+    plt.title("Valuation Dispersion by Region")
+    plt.savefig("report/charts/valuation_dispersion.png")
     plt.close()
